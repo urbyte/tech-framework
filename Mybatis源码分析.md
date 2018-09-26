@@ -191,6 +191,11 @@ SqlSession session = sessionFactory.openSession();
 * `sqlSession`持有三个对象`configuration`、`executor`、`autoCommit`
 * 通过`configuration`的`environment`获取`TransactionFactory`事务工厂类并产出一个事务；通过事务生成一个`Executor`执行器，并实例化一个`DefaultSqlSession`
 
+>* SqlSession 的实例不是线程安全的,是不能被共享的，每个线程都应该有自己的 SqlSession 实例，生命周期：请求或方法
+>
+>* SqlSessionFactory生命周期：应用，是单例与工厂模式，如Spring来生成该实例
+>* SqlMapper创建绑定映射语句的接口，其实例从SqlSession获得，因此生命周期与SqlSession相同，即：请求或方法
+
 ## mybatis 缓存
 
 ### 一级缓存
