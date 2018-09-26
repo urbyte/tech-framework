@@ -4,6 +4,8 @@
 
 ### 入口类`SqlSessionFactoryBuilder`
 
+[mybatis源码解析](https://blog.csdn.net/nmgrd/article/details/54608702)
+
 * db.properties文件
 
 ```properties
@@ -183,4 +185,33 @@ SqlSession session = sessionFactory.openSession();
   ```
 
 ## 创建会话SqlSession
+
+### 通过SqlSessionFactory工厂类产生SqlSession
+
+* `sqlSession`持有三个对象`configuration`、`executor`、`autoCommit`
+* 通过`configuration`的`environment`获取`TransactionFactory`事务工厂类并产出一个事务；通过事务生成一个`Executor`执行器，并实例化一个`DefaultSqlSession`
+
+## mybatis 缓存
+
+### 一级缓存
+
+
+
+
+
+## spring与mybatis整合
+
+>* **InitializingBean**，一个类实现了该接口，当spring启动初始化bean时，会自动调用afterPropertiesSet方法；如果同时在配置文件中指定了init-method，系统则是先调用afterPropertiesSet方法，然后在反射调用init-method中指定的方法
+>
+>  `org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory#invokeInitMethods`
+>
+>* **DisposableBean**，
+>
+>* **ApplicationContextAware**，某个bean实现了该接口，Spring容器会在创建该Bean之后，自动调用该Bean的setApplicationContextAware()方法，调用该方法时，会将容器本身ApplicationContext对象作为参数传给该方法
+>
+>* [**ApplicationListener**](https://blog.csdn.net/ilovejava_2010/article/details/7953419)，在上下文中部署一个实现了ApplicationListener接口的bean,
+>
+>  那么每当在一个ApplicationEvent发布到 ApplicationContext时， 这个bean得到通知。其实这就是标准的Oberver设计模式
+>
+>* **BeanNameAware**，Bean获取自己在BeanFactory配置中的名字
 
