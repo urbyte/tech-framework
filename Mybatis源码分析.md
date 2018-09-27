@@ -201,6 +201,8 @@ public Configuration() {
     </typeHandlers>
   ```
 
+* `typeHandler`使用：
+
 #### 解析mapper文件 `XMLConfigBuilder#mapperElement` 
 
 * 解析`mappers`节点，首先处理`package`，扫描包下的类（必须为接口），注册到`MapperRegistry#knownMappers`类型为`Map<Class<?>, MapperProxyFactory<?>>`，`key`为接口的`class`，`value`为`MapperProxyFactory`映射器代理工厂，此时并没有产生代理类；
@@ -226,6 +228,10 @@ public Configuration() {
   </mappers>
   ```
 
+#### 动态SQL原理
+
+
+
 ## 创建会话SqlSession
 
 > `org.apache.ibatis.session.SqlSession`接口，执行sql，管理事务的接口，默认实现类是`DefaultSqlSession`
@@ -236,7 +242,7 @@ public Configuration() {
 
 * 通过`configuration`的`environment`获取`TransactionFactory`事务工厂类并产出一个事务；通过事务生成一个`Executor`执行器，并实例化一个`DefaultSqlSession`
 
-  * `org.apache.ibatis.session.Configuration#newExecutor`，如果`cacheEnabled`为true，则实例化`CachingExecutor`对象，用到装饰器模式
+  * `org.apache.ibatis.session.Configuration#newExecutor`，如果`cacheEnabled`为true，则实例化`CachingExecutor`对象，即：开启二级缓存，二级缓存用`CachingExecutor`执行器，用到装饰器模式
 
   ```java
   if (cacheEnabled) {
@@ -248,6 +254,12 @@ public Configuration() {
 >
 >* SqlSessionFactory生命周期：应用，是单例与工厂模式，如Spring来生成该实例
 >* SqlMapper创建绑定映射语句的接口，其实例从SqlSession获得，因此生命周期与SqlSession相同，即：请求或方法
+
+## MapperMethod
+
+* `org.apache.ibatis.binding.MapperProxyFactory#newInstance`
+
+
 
 ## mybatis 缓存
 
@@ -287,7 +299,33 @@ protected BaseExecutor(Configuration configuration, Transaction transaction) {
 this.localCache = new PerpetualCache("LocalCache");
 ```
 
-* `org.apache.ibatis.session.defaults.DefaultSqlSession#close`清空`PerpetualCache`实例对象
+* `org.apache.ibatis.session.defaults.DefaultSqlSession#close`清空`PerpetualCache`实例对象，即清空一级缓存
+* `sqlSession`执行update、insert、delete时，都会调用`org.apache.ibatis.executor.BaseExecutor#update`方法，同时清空一级缓存
+
+```java
+@Override
+public int update(MappedStatement ms, Object parameter) throws SQLException {
+    ErrorContext.instance().resource(ms.getResource()).activity("executing an update").object(ms.getId());
+    if (closed) {
+        throw new ExecutorException("Executor was closed.");
+    }
+    clearLocalCache();
+    return doUpdate(ms, parameter);
+}
+```
+
+```java
+@Override
+public void clearLocalCache() {
+    if (!closed) {
+        //清空PerpetualCache#cache
+        localCache.clear();
+        localOutputParameterCache.clear();
+    }
+}
+```
+
+
 
 ### 二级缓存
 
@@ -327,7 +365,30 @@ this.localCache = new PerpetualCache("LocalCache");
   * 通过建造者模式构建以namespace为id的`Cache`实例对象
   * 将`Cache`实例对象保存到`org.apache.ibatis.session.Configuration#caches`中，以cache的id作为key，cache实例对象作为value存储
 
-* 
+* 如果二级缓存开启(cacheEnabled=true)，则`DefaultSqlSession`实例对象中的执行器为`CachingExecutor`(二级缓存执行器)，`CachingExecutor#query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql)`中会从二级缓存中取
+
+```java 
+@Override
+public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql)
+    throws SQLException {
+    //从二级缓存中查询；如果没有开启，则直接委托给实际执行器处理
+    Cache cache = ms.getCache();
+    if (cache != null) {
+        flushCacheIfRequired(ms);
+        if (ms.isUseCache() && resultHandler == null) {
+            ensureNoOutParams(ms, parameterObject, boundSql);
+            @SuppressWarnings("unchecked")
+            List<E> list = (List<E>) tcm.getObject(cache, key);
+            if (list == null) {
+                list = delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+                tcm.putObject(cache, key, list); // issue #578 and #116
+            }
+            return list;
+        }
+    }
+    return delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+}
+```
 
 
 
