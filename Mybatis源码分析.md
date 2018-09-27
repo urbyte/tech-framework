@@ -1,8 +1,12 @@
 # Mybatis源码分析
 
-## 解析配置文件Configuration
+## 配置文件Configuration
+
+> `org.apache.ibatis.session.Configuration`，MyBatis全局配置信息类
 
 ### 入口类`SqlSessionFactoryBuilder`
+
+> `org.apache.ibatis.session.SqlSessionFactory`接口，操作SqlSession的工厂接口，默认实现类是`DefaultSqlSessionFactory`
 
 [mybatis源码解析](https://blog.csdn.net/nmgrd/article/details/54608702)
 
@@ -76,7 +80,45 @@ SqlSession session = sessionFactory.openSession();
 
 #### 使用XPath解析mybatis-config.xml配置文件
 
-* 通过`new XMLConfigBuilder(inputStream, environment, properties)`构造一个`XMLConfigBuilder`对象，调用`parse()`解析xml配置文件中的`configuration`节点，返回`Configuration`实例对象
+* 通过`new XMLConfigBuilder(inputStream, environment, properties)`构造一个`XMLConfigBuilder`对象
+  * `XMLConfigBuilder(XPathParser parser, String environment, Properties props)`构造函数，调用父类构造，参数直接实例`Configuration`
+  * 调用`parse()`解析xml配置文件中的`configuration`节点，返回`Configuration`实例对象
+
+```java
+public Configuration() {
+    typeAliasRegistry.registerAlias("JDBC", JdbcTransactionFactory.class);
+    typeAliasRegistry.registerAlias("MANAGED", ManagedTransactionFactory.class);
+
+    typeAliasRegistry.registerAlias("JNDI", JndiDataSourceFactory.class);
+    typeAliasRegistry.registerAlias("POOLED", PooledDataSourceFactory.class);
+    typeAliasRegistry.registerAlias("UNPOOLED", UnpooledDataSourceFactory.class);
+
+    typeAliasRegistry.registerAlias("PERPETUAL", PerpetualCache.class);
+    typeAliasRegistry.registerAlias("FIFO", FifoCache.class);
+    typeAliasRegistry.registerAlias("LRU", LruCache.class);
+    typeAliasRegistry.registerAlias("SOFT", SoftCache.class);
+    typeAliasRegistry.registerAlias("WEAK", WeakCache.class);
+
+    typeAliasRegistry.registerAlias("DB_VENDOR", VendorDatabaseIdProvider.class);
+
+    typeAliasRegistry.registerAlias("XML", XMLLanguageDriver.class);
+    typeAliasRegistry.registerAlias("RAW", RawLanguageDriver.class);
+
+    typeAliasRegistry.registerAlias("SLF4J", Slf4jImpl.class);
+    typeAliasRegistry.registerAlias("COMMONS_LOGGING", JakartaCommonsLoggingImpl.class);
+    typeAliasRegistry.registerAlias("LOG4J", Log4jImpl.class);
+    typeAliasRegistry.registerAlias("LOG4J2", Log4j2Impl.class);
+    typeAliasRegistry.registerAlias("JDK_LOGGING", Jdk14LoggingImpl.class);
+    typeAliasRegistry.registerAlias("STDOUT_LOGGING", StdOutImpl.class);
+    typeAliasRegistry.registerAlias("NO_LOGGING", NoLoggingImpl.class);
+
+    typeAliasRegistry.registerAlias("CGLIB", CglibProxyFactory.class);
+    typeAliasRegistry.registerAlias("JAVASSIST", JavassistProxyFactory.class);
+
+    languageRegistry.setDefaultDriverClass(XMLLanguageDriver.class);
+    languageRegistry.register(RawLanguageDriver.class);
+  }
+```
 
 - 解析`settings`节点，并通过反射校验`setting`的name属性对应的key是否有改`setter`方法，如：`cacheEnabled`在`Configuration`类里有`setCacheEnabled`方法
 
@@ -186,12 +228,23 @@ SqlSession session = sessionFactory.openSession();
 
 ## 创建会话SqlSession
 
+> `org.apache.ibatis.session.SqlSession`接口，执行sql，管理事务的接口，默认实现类是`DefaultSqlSession`
+
 ### 通过SqlSessionFactory工厂类产生SqlSession
 
 * `sqlSession`持有三个对象`configuration`、`executor`、`autoCommit`
+
 * 通过`configuration`的`environment`获取`TransactionFactory`事务工厂类并产出一个事务；通过事务生成一个`Executor`执行器，并实例化一个`DefaultSqlSession`
 
->* SqlSession 的实例不是线程安全的,是不能被共享的，每个线程都应该有自己的 SqlSession 实例，生命周期：请求或方法
+  * `org.apache.ibatis.session.Configuration#newExecutor`，如果`cacheEnabled`为true，则实例化`CachingExecutor`对象，用到装饰器模式
+
+  ```java
+  if (cacheEnabled) {
+  	executor = new CachingExecutor(executor);
+  }
+  ```
+
+>* SqlSession 的实例不是线程安全的,是不能被共享的，每个线程都应该有自己的 SqlSession 实例，在没有Transaction的情况下生命周期：请求或方法级别，在有Transaction情况下，是Transaction范围内的
 >
 >* SqlSessionFactory生命周期：应用，是单例与工厂模式，如Spring来生成该实例
 >* SqlMapper创建绑定映射语句的接口，其实例从SqlSession获得，因此生命周期与SqlSession相同，即：请求或方法
@@ -200,9 +253,87 @@ SqlSession session = sessionFactory.openSession();
 
 ### 一级缓存
 
+>基于**PerpetualCache** 的 **HashMap**本地缓存，其**存储作用域为** **Session**，当 **Session flush** **或** **close** 之后，该**Session中的所有 Cache 就将清空**
+
+* `DefaultSqlSessionFactory#openSession`实例化`DefaultSqlSession`时，需要执行器`Executor`参数。产生`Executor`对象：
+
+```java
+if (ExecutorType.BATCH == executorType) {
+    executor = new BatchExecutor(this, transaction);
+} else if (ExecutorType.REUSE == executorType) {
+    executor = new ReuseExecutor(this, transaction);
+} else {
+    executor = new SimpleExecutor(this, transaction);
+}
+```
+
+* 实例化执行器`Executor`调用父类`BaseExecutor`构造方法：
+
+```java
+protected BaseExecutor(Configuration configuration, Transaction transaction) {
+	this.transaction = transaction;
+    this.deferredLoads = new ConcurrentLinkedQueue<DeferredLoad>();
+    this.localCache = new PerpetualCache("LocalCache");
+    this.localOutputParameterCache = new PerpetualCache("LocalOutputParameterCache");
+    this.closed = false;
+    this.configuration = configuration;
+    this.wrapper = this;
+}
+```
+
+* 一级缓存生命周期与`sqlSession`相同，实例化`sqlSession`才实例化`PerpetualCache`
+
+```java
+this.localCache = new PerpetualCache("LocalCache");
+```
+
+* `org.apache.ibatis.session.defaults.DefaultSqlSession#close`清空`PerpetualCache`实例对象
+
+### 二级缓存
+
+> **二级缓存**与一级缓存其机制相同，默认也是采用 PerpetualCache，HashMap存储，不同在于其**存储作用域为 Mapper(Namespace)**，并且**可自定义存储源**，如 Ehcache
+
+* 开启二级缓存：
+
+```xml
+<settings>	
+	<setting name="cacheEnabled" value="true"/>
+</settings>
+```
+
+* 在 mapper 映射文件中触发该Mapper(Namespace)开启二级缓存
+
+```xml
+<!-- 开启当前mapper的namespace下的二级缓存 -->
+<!-- 
+	eviction：回收策略；flushInterval：刷洗缓存，单位毫秒，默认不自动刷新；
+	size：缓存被应用的数目，默认1024次查询的结果；readOnly：只读属性，默认是false
+-->
+<cache eviction="LRU" flushInterval="60000" size="512" readOnly="true"/>
+```
+
+* `org.apache.ibatis.builder.xml.XMLMapperBuilder#cacheElement`解析mapper文件中的缓存配置
+
+  * 解析cache节点的`eviction`属性，通过回收策略属性值在`org.apache.ibatis.type.TypeAliasRegistry#resolveAlias`中查询对应的class
+
+  ```java
+  typeAliasRegistry.registerAlias("PERPETUAL", PerpetualCache.class);
+  typeAliasRegistry.registerAlias("FIFO", FifoCache.class);
+  typeAliasRegistry.registerAlias("LRU", LruCache.class);
+  typeAliasRegistry.registerAlias("SOFT", SoftCache.class);
+  typeAliasRegistry.registerAlias("WEAK", WeakCache.class);
+  ```
+
+  * 通过建造者模式构建以namespace为id的`Cache`实例对象
+  * 将`Cache`实例对象保存到`org.apache.ibatis.session.Configuration#caches`中，以cache的id作为key，cache实例对象作为value存储
+
+* 
 
 
 
+## 执行器Executor
+
+> `org.apache.ibatis.executor.Executor`接口，sql执行器，SqlSession执行sql最终是通过该接口实现的，常用的实现类有SimpleExecutor和CachingExecutor,这些实现类都使用了装饰者设计模式
 
 ## spring与mybatis整合
 
@@ -220,3 +351,14 @@ SqlSession session = sessionFactory.openSession();
 >
 >* **BeanNameAware**，Bean获取自己在BeanFactory配置中的名字
 
+### XML方式
+
+`org.mybatis.spring.mapper.MapperScannerConfigurer`
+
+
+
+
+
+### Annotation方式
+
+`org.mybatis.spring.annotation.MapperScannerRegistrar`
