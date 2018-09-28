@@ -1,5 +1,17 @@
 # Mybatis源码分析
 
+> Mybatis支持动态 SQL 、ORM 映射和提供一级二级缓存等常用功能，支持 XML 和注解两种配置方式，屏蔽了近乎所有的 JDBC 代码、 参数设置、结果集处理等。
+
+> Mybatis涉及到的设计模式：
+>
+> * 工厂模式：SqlSessionFactory、DataSourceFactory、MapperProxyFactory
+> * 建造者模式：SqlSessionFactoryBuilder
+> * 动态代理模式：MapperProxy
+> * 装饰器模式：CachingExecutor
+> * 适配器模式：日志模块
+> * 单例模式：VFS
+> * 策略模式：
+
 ## 配置文件Configuration
 
 > `org.apache.ibatis.session.Configuration`，MyBatis全局配置信息类
@@ -182,53 +194,104 @@ public Configuration() {
 
   ```xml
   <typeHandlers>
-        <!-- 
-            当配置package的时候，mybatis会去配置的package扫描TypeHandler
-            <package name="com.urbyte.demo"/>
-         -->
+      <!-- 
+  		当配置package的时候，mybatis会去配置的package扫描TypeHandler
+          <package name="com.urbyte.demo"/>
+  	-->
   
-        <!-- handler属性直接配置我们要指定的TypeHandler -->
-        <typeHandler handler=""/>
+      <!-- handler属性直接配置我们要指定的TypeHandler -->
+      <typeHandler handler=""/>
   
-        <!-- javaType 配置java类型，例如String, 如果配上javaType, 那么指定的typeHandler就只作用于指定的类型 -->
-        <typeHandler javaType="" handler=""/>
+      <!-- javaType 配置java类型，例如String, 如果配上javaType, 那么指定的typeHandler就只作用于指定的类型 -->
+      <typeHandler javaType="" handler=""/>
   
-        <!-- jdbcType 配置数据库基本数据类型，例如VARCHAR, 如果配上jdbcType, 那么指定的typeHandler就只作用于指定的类型  -->
-        <typeHandler jdbcType="" handler=""/>
+      <!-- jdbcType 配置数据库基本数据类型，例如VARCHAR, 如果配上jdbcType, 那么指定的typeHandler就只作用于指定的类型  -->
+      <typeHandler jdbcType="" handler=""/>
   
-        <!-- 也可两者都配置 -->
-        <typeHandler javaType="" jdbcType="" handler=""/>
-    </typeHandlers>
+      <!-- 也可两者都配置 -->
+      <typeHandler javaType="" jdbcType="" handler=""/>
+  </typeHandlers>
   ```
 
-* `typeHandler`使用：
-
-#### 解析mapper文件 `XMLConfigBuilder#mapperElement` 
+* `typeHandler`使用：TODO
 
 * 解析`mappers`节点，首先处理`package`，扫描包下的类（必须为接口），注册到`MapperRegistry#knownMappers`类型为`Map<Class<?>, MapperProxyFactory<?>>`，`key`为接口的`class`，`value`为`MapperProxyFactory`映射器代理工厂，此时并没有产生代理类；
 
-* 接下来处理`resource`，加载`Mapper.xml`文件：配置`namespace`、配置`cacah-ref`、配置`cache`、配置`parameterMap`、配置`resultMap`、配置sql(定义可重用的 SQL 代码段)、配置`select|insert|update|delete`：通过建造者模式添加到`Configuration#mappedStatements`类型为`Map<String, MappedStatement>`
+* 接下来处理`resource`，加载`Mapper.xml`文件：
 
   ```xml
   <mappers>
   	<!-- 第一种方式：通过resource指定 -->
   	<mapper resource="com/urbyte/dao/UserDao.xml"/>
       
-  	<!-- 第二种方式， 通过class指定接口，进而将接口与对应的xml文件形成映射关系
-               不过，使用这种方式必须保证 接口与mapper文件同名(不区分大小写)， 
-               这里接口是UserDao,那么意味着mapper文件为UserDao.xml 
-  	<mapper class="com.urbyte.dao.UserDao"/>
+  	<!-- 
+  		第二种方式， 通过class指定接口，进而将接口与对应的xml文件形成映射关系
+          不过，使用这种方式必须保证 接口与mapper文件同名(不区分大小写)， 
+          这里接口是UserDao,那么意味着mapper文件为UserDao.xml 
+  		<mapper class="com.urbyte.dao.UserDao"/>
       -->
-      <!-- 第三种方式，直接指定包，自动扫描，与方法二同理 
-      <package name="com.urbyte.dao"/>
+      <!-- 
+  		第三种方式，直接指定包，自动扫描，与方法二同理 
+      	<package name="com.urbyte.dao"/>
       -->
-      <!-- 第四种方式：通过url指定mapper文件位置
-      <mapper url="file:///var/mappers/UserDao.xml"/>
+      <!-- 
+  		第四种方式：通过url指定mapper文件位置
+      	<mapper url="file:///var/mappers/UserDao.xml"/>
       -->
   </mappers>
   ```
 
+#### 解析mapper文件 `XMLMapperBuilder#configurationElement` 
+
+* 配置`namespace`、配置`cacah-ref`、配置`cache`、配置`parameterMap`、配置`resultMap`、配置sql(定义可重用的 SQL 代码段)、配置`select|insert|update|delete`：通过建造者模式添加到`Configuration#mappedStatements`类型为`Map<String, MappedStatement>`
+* 解析`select|insert|update|delete`节点用`XMLStatementBuilder#parseStatementNode`，通过助手类`MapperBuilderAssistant#addMappedStatement`将二级缓存`currentCache`组装到`MappedStatement`对象里，构造一个`MappedStatement`对象，这里用到建造者模式。
+
+```java 
+//建造者模式
+MappedStatement.Builder statementBuilder = new MappedStatement.Builder(configuration, id, sqlSource, sqlCommandType);
+statementBuilder.resource(resource);
+statementBuilder.fetchSize(fetchSize);
+statementBuilder.statementType(statementType);
+statementBuilder.keyGenerator(keyGenerator);
+statementBuilder.keyProperty(keyProperty);
+statementBuilder.keyColumn(keyColumn);
+statementBuilder.databaseId(databaseId);
+statementBuilder.lang(lang);
+statementBuilder.resultOrdered(resultOrdered);
+statementBuilder.resulSets(resultSets);
+setStatementTimeout(timeout, statementBuilder);
+
+setStatementParameterMap(parameterMap, parameterType, statementBuilder);
+
+setStatementResultMap(resultMap, resultType, resultSetType, statementBuilder);
+/**
+currentCache 为二级缓存，根据<cache eviction="LRU" flushInterval="60000" size="512" readOnly="true"/>，eviction属性值对应的缓存回收策略，详情见二级缓存
+*/
+setStatementCache(isSelect, flushCache, useCache, currentCache, statementBuilder);
+
+MappedStatement statement = statementBuilder.build();
+
+configuration.addMappedStatement(statement);
+return statement;
+```
+
+
+
 #### 动态SQL原理
+
+
+
+
+
+## 事务Transaction
+
+
+
+
+
+## 类型处理器TypeHandler
+
+
 
 
 
@@ -279,7 +342,7 @@ if (ExecutorType.BATCH == executorType) {
 }
 ```
 
-* 实例化执行器`Executor`调用父类`BaseExecutor`构造方法：
+* 实例化执行器`Executor`调用父类`BaseExecutor`构造方法，同时实例化一级缓存`PerpetualCache`：
 
 ```java
 protected BaseExecutor(Configuration configuration, Transaction transaction) {
@@ -298,6 +361,108 @@ protected BaseExecutor(Configuration configuration, Transaction transaction) {
 ```java
 this.localCache = new PerpetualCache("LocalCache");
 ```
+
+* 查看`DefaultSqlSession#selectList(String statement, Object parameter, RowBounds rowBounds)`源码：
+
+```java
+@Override
+public <E> List<E> selectList(String statement, Object parameter, RowBounds rowBounds) {
+    try {
+        MappedStatement ms = configuration.getMappedStatement(statement);
+        return executor.query(ms, wrapCollection(parameter), rowBounds, Executor.NO_RESULT_HANDLER);
+    } catch (Exception e) {
+        throw ExceptionFactory.wrapException("Error querying database.  Cause: " + e, e);
+    } finally {
+        ErrorContext.instance().reset();
+    }
+}
+```
+
+* 生成一级缓存的key，规则为：TODO
+
+```java
+@Override
+  public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql) {
+    if (closed) {
+      throw new ExecutorException("Executor was closed.");
+    }
+    CacheKey cacheKey = new CacheKey();
+    //MyBatis 对于其 Key 的生成采取规则为：[mappedStementId + offset + limit + SQL + queryParams + environment]生成一个哈希码
+    cacheKey.update(ms.getId());
+    cacheKey.update(Integer.valueOf(rowBounds.getOffset()));
+    cacheKey.update(Integer.valueOf(rowBounds.getLimit()));
+    cacheKey.update(boundSql.getSql());
+    List<ParameterMapping> parameterMappings = boundSql.getParameterMappings();
+    TypeHandlerRegistry typeHandlerRegistry = ms.getConfiguration().getTypeHandlerRegistry();
+    // mimic DefaultParameterHandler logic
+    //模仿DefaultParameterHandler的逻辑,不再重复，请参考DefaultParameterHandler
+    for (int i = 0; i < parameterMappings.size(); i++) {
+      ParameterMapping parameterMapping = parameterMappings.get(i);
+      if (parameterMapping.getMode() != ParameterMode.OUT) {
+        Object value;
+        String propertyName = parameterMapping.getProperty();
+        if (boundSql.hasAdditionalParameter(propertyName)) {
+          value = boundSql.getAdditionalParameter(propertyName);
+        } else if (parameterObject == null) {
+          value = null;
+        } else if (typeHandlerRegistry.hasTypeHandler(parameterObject.getClass())) {
+          value = parameterObject;
+        } else {
+          MetaObject metaObject = configuration.newMetaObject(parameterObject);
+          value = metaObject.getValue(propertyName);
+        }
+        cacheKey.update(value);
+      }
+    }
+    if (configuration.getEnvironment() != null) {
+      // issue #176
+      cacheKey.update(configuration.getEnvironment().getId());
+    }
+    return cacheKey;
+  }
+```
+
+* 接下来调用`BaseExecutor#query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) `方法，`BaseExecutor#localCache`属性为一级缓存
+
+```java
+@Override
+public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+  ErrorContext.instance().resource(ms.getResource()).activity("executing a query").object(ms.getId());
+    if (closed) {
+        throw new ExecutorException("Executor was closed.");
+    }
+    if (queryStack == 0 && ms.isFlushCacheRequired()) {
+        clearLocalCache();
+    }
+    List<E> list;
+    try {
+        queryStack++;
+        //根据cachekey从一级缓存localCache查询数据
+        list = resultHandler == null ? (List<E>) localCache.getObject(key) : null;
+        if (list != null) {
+            handleLocallyCachedOutputParameters(ms, key, parameter, boundSql);
+        } else {
+            list = queryFromDatabase(ms, parameter, rowBounds, resultHandler, key, boundSql);
+        }
+    } finally {
+        queryStack--;
+    }
+    if (queryStack == 0) {
+        for (DeferredLoad deferredLoad : deferredLoads) {
+            deferredLoad.load();
+        }
+        deferredLoads.clear();
+        if (configuration.getLocalCacheScope() == LocalCacheScope.STATEMENT) {
+            clearLocalCache();
+        }
+    }
+    return list;
+}
+```
+
+* 保存数据到一级缓存：
+
+TODO
 
 * `org.apache.ibatis.session.defaults.DefaultSqlSession#close`清空`PerpetualCache`实例对象，即清空一级缓存
 * `sqlSession`执行update、insert、delete时，都会调用`org.apache.ibatis.executor.BaseExecutor#update`方法，同时清空一级缓存
@@ -325,11 +490,15 @@ public void clearLocalCache() {
 }
 ```
 
-
-
 ### 二级缓存
 
 > **二级缓存**与一级缓存其机制相同，默认也是采用 PerpetualCache，HashMap存储，不同在于其**存储作用域为 Mapper(Namespace)**，并且**可自定义存储源**，如 Ehcache
+
+> 二级缓存相关配置：
+>
+> * 全局配置文件中的setting中的cacheEnabled需要为true(默认为true)
+> * mapper配置文件中需要加入<cache>节点
+> * mapper配置文件中的select节点需要加上属性useCache需要为true(默认为true)
 
 * 开启二级缓存：
 
@@ -363,7 +532,7 @@ public void clearLocalCache() {
   ```
 
   * 通过建造者模式构建以namespace为id的`Cache`实例对象
-  * 将`Cache`实例对象保存到`org.apache.ibatis.session.Configuration#caches`中，以cache的id作为key，cache实例对象作为value存储
+  * 将`Cache`实例对象保存到`org.apache.ibatis.session.Configuration#caches`中，以cache的id作为key，cache实例对象作为value存储；将cache实例对象赋值给`MapperBuilderAssistant#currentCache`
 
 * 如果二级缓存开启(cacheEnabled=true)，则`DefaultSqlSession`实例对象中的执行器为`CachingExecutor`(二级缓存执行器)，`CachingExecutor#query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql)`中会从二级缓存中取
 
@@ -371,16 +540,18 @@ public void clearLocalCache() {
 @Override
 public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql)
     throws SQLException {
-    //从二级缓存中查询；如果没有开启，则直接委托给实际执行器处理
+    //从MappedStatement中获取缓存回收策略，同时缓存回收策略中包含缓存对象(Cache)；如果没有开启，则直接委托给实际执行器处理
     Cache cache = ms.getCache();
     if (cache != null) {
         flushCacheIfRequired(ms);
         if (ms.isUseCache() && resultHandler == null) {
             ensureNoOutParams(ms, parameterObject, boundSql);
             @SuppressWarnings("unchecked")
+            //从二级缓存中取
             List<E> list = (List<E>) tcm.getObject(cache, key);
             if (list == null) {
                 list = delegate.<E> query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+                //保存到二级缓存中
                 tcm.putObject(cache, key, list); // issue #578 and #116
             }
             return list;
@@ -392,9 +563,31 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
 
 
 
+
+
 ## 执行器Executor
 
 > `org.apache.ibatis.executor.Executor`接口，sql执行器，SqlSession执行sql最终是通过该接口实现的，常用的实现类有SimpleExecutor和CachingExecutor,这些实现类都使用了装饰者设计模式
+
+
+
+### 键值生成器KeyGenerator
+
+
+
+### 结果集处理器ResultSetHandler
+
+
+
+### 语句处理器StatementHandler
+
+
+
+
+
+## 日志接口Log
+
+
 
 ## spring与mybatis整合
 
