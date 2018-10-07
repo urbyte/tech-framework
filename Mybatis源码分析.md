@@ -474,6 +474,7 @@ public int update(MappedStatement ms, Object parameter) throws SQLException {
     if (closed) {
         throw new ExecutorException("Executor was closed.");
     }
+    //清空一级缓存
     clearLocalCache();
     return doUpdate(ms, parameter);
 }
@@ -515,8 +516,16 @@ public void clearLocalCache() {
 <!-- 
 	eviction：回收策略；flushInterval：刷洗缓存，单位毫秒，默认不自动刷新；
 	size：缓存被应用的数目，默认1024次查询的结果；readOnly：只读属性，默认是false
+	blocking：指定为true时将采用BlockingCache进行封装，默认是false
 -->
-<cache eviction="LRU" flushInterval="60000" size="512" readOnly="true"/>
+<cache eviction="LRU" flushInterval="60000" size="512" readOnly="true" blocking="false"/>
+```
+
+* cache-ref节点：用来指定其它Mapper.xml中定义的Cache，有的时候可能我们多个不同的Mapper需要共享同一个缓存的，是希望在MapperA中缓存的内容在MapperB中可以直接命中的，这个时候我们就可以考虑使用cache-ref，这种场景只需要保证它们的缓存的Key是一致的即可命中，二级缓存的Key是通过`Executor`接口的createCacheKey()方法生成的，其实现`BaseExecutor#createCacheKey`
+
+```xml
+<!--PersonMapper.xml需要引用UserMapper.xml的缓存，就直接用UserMapper.xml的namespace-->
+<cache-ref namespace="com.urbyte.mybatis.dao.UserMapper"/>
 ```
 
 * `org.apache.ibatis.builder.xml.XMLMapperBuilder#cacheElement`解析mapper文件中的缓存配置
@@ -540,7 +549,7 @@ public void clearLocalCache() {
 @Override
 public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql)
     throws SQLException {
-    //从MappedStatement中获取缓存回收策略，同时缓存回收策略中包含缓存对象(Cache)；如果没有开启，则直接委托给实际执行器处理
+    //从MappedStatement中获取缓存回收策略，同时缓存回收策略中包含缓存对象(Cache)；mapper文件如果没有配置cache节点，则ms.getCache()为空，直接委托给实际执行器(SimpleExecutor)处理,SimpleExecutor中的query方法会去查询一级缓存，如果一级缓存没有则去数据库查询
     Cache cache = ms.getCache();
     if (cache != null) {
         flushCacheIfRequired(ms);
@@ -561,15 +570,93 @@ public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds r
 }
 ```
 
+* 清空二级缓存数据：执行update、insert、delete时都会调用`CachingExecutor#update`
 
+```java
+@Override
+public int update(MappedStatement ms, Object parameterObject) throws SQLException {
+    //刷新缓存，清空二级缓存
+    flushCacheIfRequired(ms);
+    return delegate.update(ms, parameterObject);
+}
+private void flushCacheIfRequired(MappedStatement ms) {
+    Cache cache = ms.getCache();
+    if (cache != null && ms.isFlushCacheRequired()) {      
+        tcm.clear(cache);
+    }
+}
+```
 
+* 保持二级缓存数据：`DefaultSqlSession#commit`->`CachingExecutor#commit`->`TransactionalCacheManager#commit`->`TransactionalCache#commit`->`TransactionalCache#flushPendingEntries`
 
+```java
+private void flushPendingEntries() {
+    for (Map.Entry<Object, Object> entry : entriesToAddOnCommit.entrySet()) {
+        /**
+         * delegate为PerpetualCache、FifoCache、LruCache、SoftCache、WeakCache
+         * FifoCache、LruCache、SoftCache、WeakCache通过装饰器模式最终调用   PerpetualCache#putObject
+        **/
+        delegate.putObject(entry.getKey(), entry.getValue());
+    }
+    for (Object entry : entriesMissedInCache) {
+        if (!entriesToAddOnCommit.containsKey(entry)) {
+            delegate.putObject(entry, null);
+        }
+    }
+}
+```
+
+* 存在的问题：TODO
+
+### Cache接口
+
+> `org.apache.ibatis.cache.Cache`是MyBatis的缓存接口，自定义的缓存需要实现这个接口
+>
+> Cache接口的实现类使用了装饰器设计模式
+
+* 接口实现类：
+
+![image-20181005161532991](/var/folders/fr/4dpl599d5gj7gpt4csyc3x5m0000gn/T/abnerworks.Typora/image-20181005161532991.png)
+
+* LRU – 最近最少使用:移除最长时间不被使用的对象
+
+  FIFO – 先进先出:按对象进入缓存的顺序来移除它们
+
+  SOFT – 软引用:移除基于垃圾回收器状态和软引用规则的对象
+
+  WEAK – 弱引用:更积极地移除基于垃圾收集器状态和弱引用规则的对象
+
+* 自定义缓存接口，比如配置mybatis使用redis作为自定义缓存
+
+  * 实现`org.apache.ibatis.cache.Cache`接口
+  * 开启二级缓存配置
+
+  ```xml
+  <setting name="cacheEnabled" value="true"/>
+  ```
+
+  * Mapper.xml配置文件中加入cache节点
+
+  ```xml
+  <cache type="org.mybatis.caches.redis.RedisCache"/>
+  ```
+
+  * 用Redis作为自定义缓存源码：
+
+  ```xml
+  <dependency>
+      <groupId>org.mybatis.caches</groupId>
+      <artifactId>mybatis-redis</artifactId>
+      <version>1.0.0-beta2</version>
+  </dependency>
+  ```
 
 ## 执行器Executor
 
 > `org.apache.ibatis.executor.Executor`接口，sql执行器，SqlSession执行sql最终是通过该接口实现的，常用的实现类有SimpleExecutor和CachingExecutor,这些实现类都使用了装饰者设计模式
 
-
+* ![image-20181005163449385](/var/folders/fr/4dpl599d5gj7gpt4csyc3x5m0000gn/T/abnerworks.Typora/image-20181005163449385.png)
+* 
 
 ### 键值生成器KeyGenerator
 
