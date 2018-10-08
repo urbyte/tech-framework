@@ -513,9 +513,12 @@ public void clearLocalCache() {
 
 ```xml
 <!-- 开启当前mapper的namespace下的二级缓存 -->
-<!-- 
-	eviction：回收策略；flushInterval：刷洗缓存，单位毫秒，默认不自动刷新；
-	size：缓存被应用的数目，默认1024次查询的结果；readOnly：只读属性，默认是false
+<!--
+ 	type:指定cache接口的实现类的类型；不写type属性，mybatis默认使用PerpetualCache；
+	eviction：回收策略；
+	flushInterval：刷洗缓存，单位毫秒，默认不自动刷新；
+	size：缓存被应用的数目，默认1024次查询的结果；
+    readOnly：只读属性，默认是false
 	blocking：指定为true时将采用BlockingCache进行封装，默认是false
 -->
 <cache eviction="LRU" flushInterval="60000" size="512" readOnly="true" blocking="false"/>
@@ -615,6 +618,7 @@ private void flushPendingEntries() {
 > Cache接口的实现类使用了装饰器设计模式
 
 * 接口实现类：
+* [图片处理](https://blog.csdn.net/u010158659/article/details/61197893)TODO
 
 ![image-20181005161532991](/var/folders/fr/4dpl599d5gj7gpt4csyc3x5m0000gn/T/abnerworks.Typora/image-20181005161532991.png)
 
@@ -626,7 +630,67 @@ private void flushPendingEntries() {
 
   WEAK – 弱引用:更积极地移除基于垃圾收集器状态和弱引用规则的对象
 
+  LoggingCache – 输出缓存命中的日志信息
+
+  ScheduledCache – 调度缓存，负责定时清空缓存
+
+  SerializedCache – 缓存序列化和反序列化存储
+
+  SynchronizedCache – 同步的缓存装饰器，用于防止多线程并发访问
+
+* 二级缓存引用顺序：BlockingCache-->SynchronizedCache-->LoggingCache-->SerializedCache-->ScheduledCache-->LruCache/FifoCache/SoftCache/WeakCache-->PerpetualCache
+
+  ```java
+  public Cache build() {
+      setDefaultImplementations();
+      //new一个base的cache(PerpetualCache)
+      Cache cache = newBaseCacheInstance(implementation, id);
+      //设置属性
+      setCacheProperties(cache);
+      // 装饰器缓存不能应用到自定义缓存
+      if (PerpetualCache.class.equals(cache.getClass())) {
+          for (Class<? extends Cache> decorator : decorators) {
+              cache = newCacheDecoratorInstance(decorator, cache);
+              setCacheProperties(cache);
+          }
+          //附加上标准的装饰者
+          cache = setStandardDecorators(cache);
+      } else if (!LoggingCache.class.isAssignableFrom(cache.getClass())) {
+          //自定义缓存，且不是日志，要加日志缓存
+          cache = new LoggingCache(cache);
+      }
+      return cache;
+  }
+  //附加上标准的装饰者
+  private Cache setStandardDecorators(Cache cache) {
+      try {
+          MetaObject metaCache = SystemMetaObject.forObject(cache);
+          if (size != null && metaCache.hasSetter("size")) {
+              metaCache.setValue("size", size);
+          }
+          if (clearInterval != null) {
+              cache = new ScheduledCache(cache);
+              ((ScheduledCache) cache).setClearInterval(clearInterval);
+          }
+          if (readWrite) {
+              cache = new SerializedCache(cache);
+          }
+          //日志缓存
+          cache = new LoggingCache(cache);
+          cache = new SynchronizedCache(cache);
+          if (blocking) {
+              cache = new BlockingCache(cache);
+          }
+          return cache;
+      } catch (Exception e) {
+          throw new CacheException("Error building standard cache decorators.  Cause: " + e, e);
+      }
+  }
+  ```
+
 * 自定义缓存接口，比如配置mybatis使用redis作为自定义缓存
+
+  > type为自定义缓存时，装饰器上的eviction对应的回收策略不能应用到自定义缓存中
 
   * 实现`org.apache.ibatis.cache.Cache`接口
   * 开启二级缓存配置
