@@ -20,7 +20,7 @@
 
 > `org.apache.ibatis.session.SqlSessionFactory`接口，操作SqlSession的工厂接口，默认实现类是`DefaultSqlSessionFactory`
 
-[mybatis源码解析](https://blog.csdn.net/nmgrd/article/details/54608702)
+[mybatis源码解析](https://blog.csdn.net/nmgrd/article/details/54608702)、[mybatis技术内幕](https://my.oschina.net/zudajun?tab=newest&catalogId=3532897)
 
 * db.properties文件
 
@@ -90,7 +90,7 @@ SqlSessionFactory sessionFactory = new SqlSessionFactoryBuilder.build(inputStrea
 SqlSession session = sessionFactory.openSession();
 ```
 
-#### 使用XPath解析mybatis-config.xml配置文件
+### 使用XPath解析mybatis-config.xml配置文件
 
 * 通过`new XMLConfigBuilder(inputStream, environment, properties)`构造一个`XMLConfigBuilder`对象
   * `XMLConfigBuilder(XPathParser parser, String environment, Properties props)`构造函数，调用父类构造，参数直接实例`Configuration`
@@ -241,7 +241,7 @@ public Configuration() {
   </mappers>
   ```
 
-#### 解析mapper文件 `XMLMapperBuilder#configurationElement` 
+### 解析mapper文件 `XMLMapperBuilder#configurationElement` 
 
 * 配置`namespace`、配置`cacah-ref`、配置`cache`、配置`parameterMap`、配置`resultMap`、配置sql(定义可重用的 SQL 代码段)、配置`select|insert|update|delete`：通过建造者模式添加到`Configuration#mappedStatements`类型为`Map<String, MappedStatement>`
 * 解析`select|insert|update|delete`节点用`XMLStatementBuilder#parseStatementNode`，通过助手类`MapperBuilderAssistant#addMappedStatement`将二级缓存`currentCache`组装到`MappedStatement`对象里，构造一个`MappedStatement`对象，这里用到建造者模式。
@@ -275,11 +275,136 @@ configuration.addMappedStatement(statement);
 return statement;
 ```
 
+## 动态SQL原理
 
+> 处理动态SQL入口：`XMLMapperBuilder`类的`sqlElement`和`buildStatementFromContext`方法
 
-#### 动态SQL原理
+### 配置sql代码片段
 
+* `XMLMapperBuilder#sqlElement`循环处理/mapper/sql节点，*用namespace+id作为key，XNode的context作为value*，存入`Map<String, XNode> sqlFragments`中
 
+  > 注意：sqlFragments包括相同的key，原XNode的context属性databaseId不为空，则直接不替换原值，否则覆盖原值
+
+  ```java
+  private void sqlElement(List<XNode> list, String requiredDatabaseId) throws Exception {
+      for (XNode context : list) {
+          String databaseId = context.getStringAttribute("databaseId");
+          String id = context.getStringAttribute("id");
+          //将id增加namespace空间，即id = namespace + id
+          id = builderAssistant.applyCurrentNamespace(id, false);
+          //将sql片段放入hashmap,context为：<sql id=""> xxx </sql>
+          if (databaseIdMatchesCurrent(id, databaseId, requiredDatabaseId)) {
+              sqlFragments.put(id, context);
+          }
+      }
+  }
+  
+  private boolean databaseIdMatchesCurrent(String id, String databaseId, String requiredDatabaseId) {
+      if (requiredDatabaseId != null) {
+          //requiredDatabaseId与databaseId相同，则直接返回true，无论是否存在相同的id直接用新的SQL
+          if (!requiredDatabaseId.equals(databaseId)) {
+              return false;
+          }
+      } else {
+          if (databaseId != null) {
+              return false;
+          }
+          //判断是否存在相同的id
+          if (this.sqlFragments.containsKey(id)) {
+              XNode context = this.sqlFragments.get(id);
+              //原sql节点有databaseId，则false，不覆盖；否则返回true，覆盖老的sql
+              if (context.getStringAttribute("databaseId") != null) {
+                  return false;
+              }
+          }
+      }
+      return true;
+  }
+  ```
+
+### 配置select|insert|update|delete语句
+
+* `XMLMapperBuilder#buildStatementFromContext`循环处理mapper下的select|insert|update|delete节点，实例化`XMLStatementBuilder`类，调用方法`XMLStatementBuilder#parseStatementNode`解析相应节点
+
+* fetchSize：批量返回的结果行数
+* timeout：超时时间
+* parameterType：参数类型，如果值为class（比如model对象），直接用`Resources.classForName(class)`，因此可以直接使用`java.lang.Integer`、`java.lang.Long`等类型；如果值为typeAlias时，通过`TypeAliasRegistry#TYPE_ALIASES`获取Class<T>，该Class是在解析configuration配置时已经装配好，详见代码：`XMLConfigBuilder#typeAliasesElement`
+
+```java
+private void typeAliasesElement(XNode parent) {
+    if (parent != null) {
+        for (XNode child : parent.getChildren()) {
+            if ("package".equals(child.getName())) {
+                String typeAliasPackage = child.getStringAttribute("name");
+                //扫描包下的类，然后注册别名(有@Alias注解则用，没有则取类的simpleName)
+                configuration.getTypeAliasRegistry().registerAliases(typeAliasPackage);
+            } else {//处理配置typeAlias
+                String alias = child.getStringAttribute("alias");
+                String type = child.getStringAttribute("type");
+                try {
+                    Class<?> clazz = Resources.classForName(type);
+                    //根据Class名字来注册类型别名
+                    //（二）调用TypeAliasRegistry.registerAlias
+                    if (alias == null) {
+                        //alias可以省略
+                        typeAliasRegistry.registerAlias(clazz);
+                    } else {
+                        typeAliasRegistry.registerAlias(alias, clazz);
+                    }
+                } catch (ClassNotFoundException e) {
+                    throw new BuilderException("Error registering typeAlias for '" + alias + "'. Cause: " + e, e);
+                }
+            }
+        }
+    }
+}
+```
+
+```xml
+<!-- typeAlias配置 -->   
+<typeAliases>
+  <typeAlias alias="user" type="com.urbyte.entity.User"/>
+  <typeAlias alias="userLog" type="com.urbyte.entity.UserLog"/>
+</typeAliases>
+<!-- package配置 -->   
+<typeAliases>
+  <package name="com.urbyte.entity"/>
+</typeAliases>
+```
+
+* resultMap：引用外部返回结果
+* resultType：返回类型，与parameterType类似
+* lang：脚本语言，值为XML、RAW，不设置默认为用`XMLLanguageDriver`
+
+```java
+//XMLLanguageDriver处理xml的sql，RawLanguageDriver处理静态sql
+typeAliasRegistry.registerAlias("XML", XMLLanguageDriver.class);
+typeAliasRegistry.registerAlias("RAW", RawLanguageDriver.class);
+
+//默认注册XMLLanguageDriver
+languageRegistry.setDefaultDriverClass(XMLLanguageDriver.class);
+languageRegistry.register(RawLanguageDriver.class);
+```
+
+* resultSetType：结果集类型，值为：FORWARD_ONLY|SCROLL_SENSITIVE|SCROLL_INSENSITIVE，默认为FORWARD_ONLY
+
+​       FORWARD_ONLY：结果集的游标只能向下滚动
+
+​       SCROLL_INSENSITIVE：结果集的游标可以上下移动，当数据库变化时，当前结果集不变 
+
+​       SCROLL_SENSITIVE：返回可滚动的结果集，当数据库变化时，当前结果集同步改变
+
+* statementType：语句类型，值为：STATEMENT|PREPARED|CALLABLE，默认为PREPARED
+
+* sqlCommandType：sql命令类型，获取select|insert|update|delete节点名称判断是否为select类型，如果是，isSelect为true，否则为false
+* flushCache：是否刷新缓存标识，默认为!isSelect
+* useCache：是否缓存select结果标识，默认为isSelect
+* resultOrdered：针对嵌套结果 select 语句适用：如果为 true，就是假设包含了嵌套结果集或是分组了，这样的话当返回一个主结果行的时候，就不会发生有对前面结果集的引用的情况。这就使得在获取嵌套的结果集的时候不至于导致内存不够用。默认值：`false`
+
+### 解析include代码片段
+
+* 实例化`XMLIncludeTransformer` XML include转换器类，调用`XMLIncludeTransformer#applyIncludes`方法处理include
+* 
 
 
 
