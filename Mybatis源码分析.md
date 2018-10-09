@@ -1,6 +1,8 @@
 # Mybatis源码分析
 
 > Mybatis支持动态 SQL 、ORM 映射和提供一级二级缓存等常用功能，支持 XML 和注解两种配置方式，屏蔽了近乎所有的 JDBC 代码、 参数设置、结果集处理等。
+>
+> 源码分析基于mybatis版本3.2.x
 
 > Mybatis涉及到的设计模式：
 >
@@ -15,6 +17,22 @@
 ## 配置文件Configuration
 
 > `org.apache.ibatis.session.Configuration`，MyBatis全局配置信息类
+
+### 基本结构
+
+* configuration -- 根元素
+  - properties —— 定义配置外在化
+  - settings —— 一些全局性的配置
+  - typeAliases —— 为一些类定义别名
+  - typeHandlers —— 定义类型处理，也就是定义java类型与数据库中的数据类型之间的转换关系
+  - objectFactory —— 对象工厂
+  - plugins —— Mybatis的插件，插件可以修改Mybatis内部的运行规则
+  - environments —— 配置Mybatis的环境
+    - environment
+      - transactionManager —— 事务管理器
+      - dataSource —— 数据源
+  - databaseIdProvider
+  - mappers —— 指定映射文件或映射类
 
 ### 入口类`SqlSessionFactoryBuilder`
 
@@ -388,11 +406,11 @@ languageRegistry.register(RawLanguageDriver.class);
 
 * resultSetType：结果集类型，值为：FORWARD_ONLY|SCROLL_SENSITIVE|SCROLL_INSENSITIVE，默认为FORWARD_ONLY
 
-​       FORWARD_ONLY：结果集的游标只能向下滚动
+       FORWARD_ONLY：结果集的游标只能向下滚动
 
-​       SCROLL_INSENSITIVE：结果集的游标可以上下移动，当数据库变化时，当前结果集不变 
+       SCROLL_INSENSITIVE：结果集的游标可以上下移动，当数据库变化时，当前结果集不变 
 
-​       SCROLL_SENSITIVE：返回可滚动的结果集，当数据库变化时，当前结果集同步改变
+       SCROLL_SENSITIVE：返回可滚动的结果集，当数据库变化时，当前结果集同步改变
 
 * statementType：语句类型，值为：STATEMENT|PREPARED|CALLABLE，默认为PREPARED
 
@@ -404,7 +422,8 @@ languageRegistry.register(RawLanguageDriver.class);
 ### 解析include代码片段
 
 * 实例化`XMLIncludeTransformer` XML include转换器类，调用`XMLIncludeTransformer#applyIncludes`方法处理include
-* 
+* 首先处理元素节点，遍历元素节点下的子节点
+* 然后处理include节点，通过refid+namespace生成ID，从`Map<String, XNode> sqlFragments`获取sql片段节点
 
 
 
