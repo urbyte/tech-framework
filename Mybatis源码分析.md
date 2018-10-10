@@ -407,9 +407,9 @@ languageRegistry.register(RawLanguageDriver.class);
 * resultSetType：结果集类型，值为：FORWARD_ONLY|SCROLL_SENSITIVE|SCROLL_INSENSITIVE，默认为FORWARD_ONLY
 
        FORWARD_ONLY：结果集的游标只能向下滚动
-
+        
        SCROLL_INSENSITIVE：结果集的游标可以上下移动，当数据库变化时，当前结果集不变 
-
+        
        SCROLL_SENSITIVE：返回可滚动的结果集，当数据库变化时，当前结果集同步改变
 
 * statementType：语句类型，值为：STATEMENT|PREPARED|CALLABLE，默认为PREPARED
@@ -423,7 +423,58 @@ languageRegistry.register(RawLanguageDriver.class);
 
 * 实例化`XMLIncludeTransformer` XML include转换器类，调用`XMLIncludeTransformer#applyIncludes`方法处理include
 * 首先处理元素节点，遍历元素节点下的子节点
-* 然后处理include节点，通过refid+namespace生成ID，从`Map<String, XNode> sqlFragments`获取sql片段节点
+* 然后处理include节点，通过refid+namespace生成ID，从`Map<String, XNode> sqlFragments`获取sql片段节点，替换sql片段，将sql片段中的文本加入到sql片段前，最后移除sql片段，例如：
+
+
+```xml
+<!--1.解析节点-->
+<select id="count" resultType="int">
+    select count(1) from (
+    	<include refid="user"></include>
+    ) tmp
+</select>
+
+<!--2.include节点替换为sqlFragment节点-->
+<select id="count" resultType="int">
+    select count(1) from (
+        <sql id="user">
+            select * from users
+        </sql>
+    ) tmp
+</select>
+
+<!--3.将sqlFragment的子节点（文本节点）insert到sqlFragment节点的前面-->
+<select id="count" resultType="int">
+    select count(1) from (
+        select * from users
+        <sql id="user">
+            select * from users
+        </sql>
+    ) tmp
+</select>
+
+<!--4.移除sqlFragment节点-->
+<select id="count" resultType="int">
+    select count(1) from (
+    	select * from users
+    ) tmp
+</select>
+```
+
+### 解析selectKey语句
+
+* resultType：返回类型，如果值为class（比如model对象），直接用`Resources.classForName(class)`，因此可以直接使用`java.lang.Integer`、`java.lang.Long`等类型；如果值为typeAlias时，通过`TypeAliasRegistry#TYPE_ALIASES`获取Class<T>，该Class是在解析configuration配置时已经装配好，详见代码：`XMLConfigBuilder#typeAliasesElement`
+* statementType：语句类型，值为：STATEMENT|PREPARED|CALLABLE，默认为PREPARED
+* keyProperty：(仅对 insert 有用) 标记一个属性, MyBatis 会通过 getGeneratedKeys 或者通过 insert 语句的 selectKey 子元素设置它的值。默认: 不设置
+* keyColumn：(仅对 insert 有用) 标记一个属性, MyBatis 会通过 getGeneratedKeys 或者通过 insert 语句的 selectKey 子元素设置它的值。默认: 不设置
+* order：执行顺序，值为BEFORE|AFTER，默认为AFTER。如果设置为 BEFORE，那么它会首先选择主键，设置 keyProperty 然后执行插入语句；如果设置为 AFTER，那么先执行插入语句，然后是 selectKey 元素
+* 
+
+
+
+
+
+* 
 
 
 
