@@ -463,18 +463,48 @@ languageRegistry.register(RawLanguageDriver.class);
 
 ### 解析selectKey语句
 
+```xml
+<!--新增信息，并拿到新增信息的表主键信息 -->
+<insert id="insertAndgetkey" parameterType="com.urbyte.mybatis.model.User">
+    <!--
+		selectKey 会将 SELECT LAST_INSERT_ID()的结果放入到传入的model的主键里面
+        keyProperty 对应的model中的主键的属性名，这里是user中的id，因为它跟数据库的主键对应
+        order AFTER 表示 SELECT LAST_INSERT_ID() 在insert执行之后执行,多用与自增主键，
+              BEFORE 表示 SELECT LAST_INSERT_ID() 在insert执行之前执行，这样的话就拿不到主键了，这种适合那种主键不是自增的类型
+        resultType 主键类型 -->
+    <selectKey keyProperty="id" order="AFTER" resultType="java.lang.Integer">
+        SELECT LAST_INSERT_ID()
+    </selectKey>
+    insert into t_user (username,password,create_date) values(#{username},#{password},#{createDate})
+</insert>
+```
+
 * resultType：返回类型，如果值为class（比如model对象），直接用`Resources.classForName(class)`，因此可以直接使用`java.lang.Integer`、`java.lang.Long`等类型；如果值为typeAlias时，通过`TypeAliasRegistry#TYPE_ALIASES`获取Class<T>，该Class是在解析configuration配置时已经装配好，详见代码：`XMLConfigBuilder#typeAliasesElement`
 * statementType：语句类型，值为：STATEMENT|PREPARED|CALLABLE，默认为PREPARED
 * keyProperty：(仅对 insert 有用) 标记一个属性, MyBatis 会通过 getGeneratedKeys 或者通过 insert 语句的 selectKey 子元素设置它的值。默认: 不设置
 * keyColumn：(仅对 insert 有用) 标记一个属性, MyBatis 会通过 getGeneratedKeys 或者通过 insert 语句的 selectKey 子元素设置它的值。默认: 不设置
 * order：执行顺序，值为BEFORE|AFTER，默认为AFTER。如果设置为 BEFORE，那么它会首先选择主键，设置 keyProperty 然后执行插入语句；如果设置为 AFTER，那么先执行插入语句，然后是 selectKey 元素
-* 
+* selectKey语句是不支持自增的主键生成策略，用的`NoKeyGenerator`实例对象
 
+```java
+/**
+ * 将NoKeyGenerator的实例对象传入到    
+ * org.apache.ibatis.builder.MapperBuilderAssistant#addMappedStatement方法中，
+ * 构建一个MappedStatement对象
+KeyGenerator keyGenerator = new NoKeyGenerator();
+```
 
+* 通过`XMLScriptBuilder`XML脚本构建器解析并构建一个`DynamicSqlSource`对象或`RawSqlSource`对象
+  * selectKey节点下子节点的类型是元素节点，元素节点的名称为动态sql的9个标签名称：trim|where|set|foreach|if|choose|when|otherwise|bind，则为实例化`DynamicSqlSource`对象
+  * selectKey节点下子节点的类型是CDATA节点或文本节点，调用方法`org.apache.ibatis.scripting.xmltags.TextSqlNode#isDynamic`判断是否为动态sql，动态实例化`DynamicSqlSource`对象，静态实例化`RawSqlSource`对象
 
+* sqlCommandType：sql命令类型，直接默认为`SqlCommandType.SELECT`
 
-
-* 
+* 通过`org.apache.ibatis.builder.MapperBuilderAssistant#addMappedStatement`方法构造一个`MappedStatement`实例，用到建造者模式
+  * 语句参数映射：
+  * 语句结果映射：
+  * 语句缓存：
+* `MappedStatement`实例对象存入到`org.apache.ibatis.session.Configuration#mappedStatements`中，类型为Map<String, MappedStatement>，以namespace+id作为key，以`MappedStatement`映射语句对象为value
 
 
 
