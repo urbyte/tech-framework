@@ -434,7 +434,19 @@ languageRegistry.register(RawLanguageDriver.class);
    >​    insert into t_user (username,password,create_date) values(#{username},#{password},#{createDate})
    ></insert>
 
-* resultSets：
+* resultSets：结果集 
+
+* keyProperty：(仅对 insert 有用) 标记一个属性, MyBatis 会通过 getGeneratedKeys 或者通过 insert 语句的 selectKey 子元素设置它的值。默认: 不设置
+
+* keyColumn：(仅对 insert 有用) 标记一个属性, MyBatis 会通过 getGeneratedKeys 或者通过 insert 语句的 selectKey 子元素设置它的值。默认: 不设置
+
+* keyGenerator：根据namespace+id为key获取`org.apache.ibatis.session.Configuration#keyGenerators`中的值，即：解析selectKey语句的keyGenerator值，如果不存在通过节点上的useGeneratedKeys属性决定使用`Jdbc3KeyGenerator`还是`NoKeyGenerator`键值生成器
+
+* 通过映射构造助手类`MapperBuilderAssistant#addMappedStatement`返回MappedStatement映射语句，用到建造者模式
+
+   * 语句参数映射，见小节：《解析selectKey语句》
+   * 语句结果映射，见小节：《解析selectKey语句》
+   * 语句缓存，见小节：《解析selectKey语句》 
 
 ### 解析include代码片段
 
@@ -593,6 +605,8 @@ KeyGenerator keyGenerator = new NoKeyGenerator();
   * 语句缓存：将flushCache（是否刷新标识）、useCache（是否使用二级缓存标识）、Cache（缓存策略）设置到`org.apache.ibatis.mapping.MappedStatement.Builder`中
 
 * `MappedStatement`实例对象存入到`org.apache.ibatis.session.Configuration#mappedStatements`中，类型为Map<String, MappedStatement>，以namespace+id作为key，以`MappedStatement`映射语句对象为value
+
+* 添加KeyGenerator到`org.apache.ibatis.session.Configuration#keyGenerators`中，以namespace+id作为key，以SelectKeyGenerator对象为value，SelectKeyGenerator对象由`MappedStatement`实例对象（上一小点产生的对象）和order构造出来的
 
 
 
