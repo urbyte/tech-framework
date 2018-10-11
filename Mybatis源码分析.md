@@ -415,9 +415,26 @@ languageRegistry.register(RawLanguageDriver.class);
 * statementType：语句类型，值为：STATEMENT|PREPARED|CALLABLE，默认为PREPARED
 
 * sqlCommandType：sql命令类型，获取select|insert|update|delete节点名称判断是否为select类型，如果是，isSelect为true，否则为false
+
 * flushCache：是否刷新缓存标识，默认为!isSelect
+
 * useCache：是否缓存select结果标识，默认为isSelect
+
 * resultOrdered：针对嵌套结果 select 语句适用：如果为 true，就是假设包含了嵌套结果集或是分组了，这样的话当返回一个主结果行的时候，就不会发生有对前面结果集的引用的情况。这就使得在获取嵌套的结果集的时候不至于导致内存不够用。默认值：`false`
+
+* 通过`XMLScriptBuilder`XML脚本构建器解析并构建一个`DynamicSqlSource`对象或`RawSqlSource`对象
+
+   - selectKey节点下子节点的类型是元素节点，元素节点的名称为动态sql的9个标签名称：trim|where|set|foreach|if|choose|when|otherwise|bind，则为实例化`DynamicSqlSource`对象
+   - selectKey节点下子节点的类型是CDATA节点或文本节点，调用方法`org.apache.ibatis.scripting.xmltags.TextSqlNode#isDynamic`判断是否为动态sql，动态实例化`DynamicSqlSource`对象，静态实例化`RawSqlSource`对象
+
+   >注意：这里解析的是insert节点里的文本
+   >
+   ><!--新增信息，并拿到新增信息的表主键信息 -->
+   ><insert id="insertAndgetkey" parameterType="com.urbyte.mybatis.model.User">
+   >​    insert into t_user (username,password,create_date) values(#{username},#{password},#{createDate})
+   ></insert>
+
+* resultSets：
 
 ### 解析include代码片段
 
@@ -498,12 +515,83 @@ KeyGenerator keyGenerator = new NoKeyGenerator();
   * selectKey节点下子节点的类型是元素节点，元素节点的名称为动态sql的9个标签名称：trim|where|set|foreach|if|choose|when|otherwise|bind，则为实例化`DynamicSqlSource`对象
   * selectKey节点下子节点的类型是CDATA节点或文本节点，调用方法`org.apache.ibatis.scripting.xmltags.TextSqlNode#isDynamic`判断是否为动态sql，动态实例化`DynamicSqlSource`对象，静态实例化`RawSqlSource`对象
 
+  >注意：这里解析的是selectKey节点里的文本    
+  >
+  ><selectKey keyProperty="id" order="AFTER" resultType="java.lang.Integer">
+  >​        SELECT LAST_INSERT_ID()
+  > </selectKey>
+
 * sqlCommandType：sql命令类型，直接默认为`SqlCommandType.SELECT`
 
 * 通过`org.apache.ibatis.builder.MapperBuilderAssistant#addMappedStatement`方法构造一个`MappedStatement`实例，用到建造者模式
-  * 语句参数映射：
-  * 语句结果映射：
-  * 语句缓存：
+  * 语句参数映射：parameterMap不为空直接构造到`org.apache.ibatis.mapping.MappedStatement.Builder`对象里；为空则用namespace+id+"-Inline"为id、parameterTypeClass、parameterMappings构造一个`ParameterMap`对象
+
+  ```java
+  private void setStatementParameterMap(
+      String parameterMap,
+      Class<?> parameterTypeClass,
+      MappedStatement.Builder statementBuilder) {
+      parameterMap = applyCurrentNamespace(parameterMap, true);
+  
+      if (parameterMap != null) {
+          try {
+              statementBuilder.parameterMap(configuration.getParameterMap(parameterMap));
+          } catch (IllegalArgumentException e) {
+              throw new IncompleteElementException("Could not find parameter map " + parameterMap, e);
+          }
+      } else if (parameterTypeClass != null) {
+          //<insert id="insertAndgetkey" parameterType="com.urbyte.mybatis.model.User"> mybatis默认会自动创建一个ParameterMap
+          List<ParameterMapping> parameterMappings = new ArrayList<ParameterMapping>();
+          //建造者模式，id=namespace+id+"-Inline"
+          ParameterMap.Builder inlineParameterMapBuilder = new ParameterMap.Builder(
+              configuration,
+              statementBuilder.id() + "-Inline",
+              parameterTypeClass,
+              parameterMappings);
+          statementBuilder.parameterMap(inlineParameterMapBuilder.build());
+      }
+  }
+  ```
+
+  * 语句结果映射：resultMap不为空直接根据namespace+resultMap名称从org.apache.ibatis.session.Configuration#resultMaps中获取一个`ResultMap`对象；为空则用namespace+id+"-Inline"为id、resultType、ResultMapping对象构造一个`ResultMap`对象；将`ResultMap`对象存入到`List<ResultMap> resultMaps`中，将`resultMaps`设置到`org.apache.ibatis.mapping.MappedStatement.Builder`中
+
+  ```java
+  private void setStatementResultMap(
+      String resultMap,
+      Class<?> resultType,
+      ResultSetType resultSetType,
+      MappedStatement.Builder statementBuilder) {
+      resultMap = applyCurrentNamespace(resultMap, true);
+  
+      List<ResultMap> resultMaps = new ArrayList<ResultMap>();
+      if (resultMap != null) {
+          String[] resultMapNames = resultMap.split(",");
+          for (String resultMapName : resultMapNames) {
+              try {
+                  resultMaps.add(configuration.getResultMap(resultMapName.trim()));
+              } catch (IllegalArgumentException e) {
+                  throw new IncompleteElementException("Could not find result map " + resultMapName, e);
+              }
+          }
+      } else if (resultType != null) {
+          //<select id="selectUsers" resultType="User">
+          //mybatis默认会自动创建一个ResultMap
+          ResultMap.Builder inlineResultMapBuilder = new ResultMap.Builder(
+              configuration,
+              statementBuilder.id() + "-Inline",
+              resultType,
+              new ArrayList<ResultMapping>(),
+              null);
+          resultMaps.add(inlineResultMapBuilder.build());
+      }
+      statementBuilder.resultMaps(resultMaps);
+  
+      statementBuilder.resultSetType(resultSetType);
+  }
+  ```
+
+  * 语句缓存：将flushCache（是否刷新标识）、useCache（是否使用二级缓存标识）、Cache（缓存策略）设置到`org.apache.ibatis.mapping.MappedStatement.Builder`中
+
 * `MappedStatement`实例对象存入到`org.apache.ibatis.session.Configuration#mappedStatements`中，类型为Map<String, MappedStatement>，以namespace+id作为key，以`MappedStatement`映射语句对象为value
 
 
