@@ -628,22 +628,99 @@ KeyGenerator keyGenerator = new NoKeyGenerator();
 
 ### 通过SqlSessionFactory工厂类产生SqlSession
 
-* `sqlSession`持有三个对象`configuration`、`executor`、`autoCommit`
+* `sqlSession`默认实现是`DefaultSqlSession`，其中持有三个对象`configuration`、`executor`、`autoCommit`
 
-* 通过`configuration`的`environment`获取`TransactionFactory`事务工厂类并产出一个事务；通过事务生成一个`Executor`执行器，并实例化一个`DefaultSqlSession`
+```java
+//配置对象
+private Configuration configuration;
+//执行器
+private Executor executor;
+//是否自动提交事务
+private boolean autoCommit;
+```
 
-  * `org.apache.ibatis.session.Configuration#newExecutor`，如果`cacheEnabled`为true，则实例化`CachingExecutor`对象，即：开启二级缓存，二级缓存用`CachingExecutor`执行器，用到装饰器模式
+* 通过`configuration`的`environment`获取`TransactionFactory`事务工厂类并产出一个事务；通过事务生成一个`Executor`执行器，并实例化一个`DefaultSqlSession`。`DefaultSqlSessionFactory`提供两种方式实例化`DefaultSqlSession`
 
-  ```java
-  if (cacheEnabled) {
-  	executor = new CachingExecutor(executor);
-  }
-  ```
+```java
+//通过数据源方式实例化DefaultSqlSession
+private SqlSession openSessionFromDataSource(ExecutorType execType, TransactionIsolationLevel level, boolean autoCommit) {
+    Transaction tx = null;
+    try {
+        //获取 mybatis-config.xml 配置文件的配置 Environment
+        final Environment environment = configuration.getEnvironment();
+        final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
+        //通过事务工厂来产生一个事务
+        tx = transactionFactory.newTransaction(environment.getDataSource(), level, autoCommit);
+        //生成一个执行器(事务包含在执行器里)
+        final Executor executor = configuration.newExecutor(tx, execType);
+        //创建DefaultSqlSession
+        return new DefaultSqlSession(configuration, executor, autoCommit);
+    } catch (Exception e) {
+        //异常时关闭Transaction
+        closeTransaction(tx);
+        throw ExceptionFactory.wrapException("Error opening session.  Cause: " + e, e);
+    } finally {
+        //最后清空错误上下文
+        ErrorContext.instance().reset();
+    }
+}
+```
+
+```java
+//通过用户提供的数据库连接对象实例化DefaultSqlSession
+private SqlSession openSessionFromConnection(ExecutorType execType, Connection connection) {
+    try {
+        boolean autoCommit;
+        try {
+            autoCommit = connection.getAutoCommit();
+        } catch (SQLException e) {
+            autoCommit = true;
+        }      
+        //获取 mybatis-config.xml 配置文件的配置 Environment
+        final Environment environment = configuration.getEnvironment();
+        final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
+        final Transaction tx = transactionFactory.newTransaction(connection);
+        final Executor executor = configuration.newExecutor(tx, execType);
+        return new DefaultSqlSession(configuration, executor, autoCommit);
+    } catch (Exception e) {
+        throw ExceptionFactory.wrapException("Error opening session.  Cause: " + e, e);
+    } finally {
+        ErrorContext.instance().reset();
+    }
+}
+```
+
+*  `org.apache.ibatis.session.Configuration#newExecutor`，如果`cacheEnabled`为true，则实例化`CachingExecutor`对象，即：开启二级缓存，二级缓存用`CachingExecutor`执行器，用到装饰器模式
+
+```java
+if (cacheEnabled) {
+	executor = new CachingExecutor(executor);
+}
+```
 
 >* SqlSession 的实例不是线程安全的,是不能被共享的，每个线程都应该有自己的 SqlSession 实例，在没有Transaction的情况下生命周期：请求或方法级别，在有Transaction情况下，是Transaction范围内的
 >
 >* SqlSessionFactory生命周期：应用，是单例与工厂模式，如Spring来生成该实例
 >* SqlMapper创建绑定映射语句的接口，其实例从SqlSession获得，因此生命周期与SqlSession相同，即：请求或方法
+
+### `SqlSessionManager`
+
+* `SqlSessionManager`与`DefaultSqlSessionFactory`不同点是`SqlSessionManager`提供另一种模式`SqlSessionManager` 通过` localSqlSession` 这个 `ThreadLocal `变量，记录与当前线程绑定的 SqlSession 对象，供前线程循环使用，从而避免在同一线程多次创建 SqlSession 对象带来的性能损失。
+
+```java 
+private final SqlSessionFactory sqlSessionFactory;
+private final SqlSession sqlSessionProxy;
+//当前线程的本地变量
+private ThreadLocal<SqlSession> localSqlSession = new ThreadLocal<SqlSession>();
+```
+
+* 实例化`SqlSessionManager`对象
+
+```Java
+
+```
+
+
 
 ## MapperMethod
 
@@ -1044,7 +1121,7 @@ private void flushPendingEntries() {
 
 ## 执行器Executor
 
-> `org.apache.ibatis.executor.Executor`接口，sql执行器，SqlSession执行sql最终是通过该接口实现的，常用的实现类有SimpleExecutor和CachingExecutor,这些实现类都使用了装饰者设计模式
+> `org.apache.ibatis.executor.Executor`接口，sql执行器，SqlSession执行sql最终是通过该接口实现的，常用的实现类有SimpleExecutor和CachingExecutor，这些实现类都使用了装饰者设计模式
 
 * ![image-20181005163449385](/var/folders/fr/4dpl599d5gj7gpt4csyc3x5m0000gn/T/abnerworks.Typora/image-20181005163449385.png)
 * 
