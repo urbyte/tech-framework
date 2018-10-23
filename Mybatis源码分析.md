@@ -714,13 +714,86 @@ private final SqlSession sqlSessionProxy;
 private ThreadLocal<SqlSession> localSqlSession = new ThreadLocal<SqlSession>();
 ```
 
-* 实例化`SqlSessionManager`对象
+* 实例化`SqlSessionManager`对象，构造方法中通过动态代理产生一个sqlSession的代理类
 
 ```Java
-
+private SqlSessionManager(SqlSessionFactory sqlSessionFactory) {
+    this.sqlSessionFactory = sqlSessionFactory;
+    //通过动态代理产生一个sqlSession的代理类
+    this.sqlSessionProxy = (SqlSession) Proxy.newProxyInstance(
+        SqlSessionFactory.class.getClassLoader(),
+        new Class[]{SqlSession.class},
+        new SqlSessionInterceptor());
+}
 ```
 
+* 通过`SqlSessionFactory`接口实现类(DefaultSqlSessionFactory)创建一个SqlSession，同时设置到`localSqlSession`这个 `ThreadLocal `变量中
 
+```java
+public void startManagedSession() {
+    this.localSqlSession.set(openSession());
+}
+public void startManagedSession(boolean autoCommit) {
+    this.localSqlSession.set(openSession(autoCommit));
+}
+public void startManagedSession(Connection connection) {
+    this.localSqlSession.set(openSession(connection));
+}
+public void startManagedSession(TransactionIsolationLevel level) {
+    this.localSqlSession.set(openSession(level));
+}
+public void startManagedSession(ExecutorType execType) {
+    this.localSqlSession.set(openSession(execType));
+}
+public void startManagedSession(ExecutorType execType, boolean autoCommit) {
+    this.localSqlSession.set(openSession(execType, autoCommit));
+}
+public void startManagedSession(ExecutorType execType, TransactionIsolationLevel level) {
+    this.localSqlSession.set(openSession(execType, level));
+}
+public void startManagedSession(ExecutorType execType, Connection connection) {
+    this.localSqlSession.set(openSession(execType, connection));
+}
+```
+
+* 产生的`sqlSessionProxy`代理类执行selectXX方式，执行`org.apache.ibatis.session.SqlSessionManager.SqlSessionInterceptor#invoke`，方法中首先从`localSqlSession`获取`sqlSession`，不存在则执行`openSession()`，最终调用方法：`org.apache.ibatis.executor.BaseExecutor#query(org.apache.ibatis.mapping.MappedStatement, java.lang.Object, org.apache.ibatis.session.RowBounds, org.apache.ibatis.session.ResultHandler, org.apache.ibatis.cache.CacheKey, org.apache.ibatis.mapping.BoundSql)`
+
+```java
+//代理模式
+private class SqlSessionInterceptor implements InvocationHandler {
+    public SqlSessionInterceptor() {
+        // Prevent Synthetic Access
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        final SqlSession sqlSession = SqlSessionManager.this.localSqlSession.get();
+        if (sqlSession != null) {
+            //线程本地变量有SqlSession，则直接调用
+            try {
+                return method.invoke(sqlSession, args);
+            } catch (Throwable t) {
+                throw ExceptionUtil.unwrapThrowable(t);
+            }
+        } else {
+            //当前线程没有SqlSession，先打开session，再调用,最后提交
+            final SqlSession autoSqlSession = openSession();
+            try {
+                final Object result = method.invoke(autoSqlSession, args);
+                autoSqlSession.commit();
+                return result;
+            } catch (Throwable t) {
+                autoSqlSession.rollback();
+                throw ExceptionUtil.unwrapThrowable(t);
+            } finally {
+                autoSqlSession.close();
+            }
+        }
+    }
+}
+```
+
+* org.apache.ibatis.session.SqlSessionManager#close`方法关闭sqlSession，同时清空localSqlSession值
 
 ## MapperMethod
 
