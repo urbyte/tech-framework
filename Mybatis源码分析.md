@@ -718,6 +718,7 @@ private ThreadLocal<SqlSession> localSqlSession = new ThreadLocal<SqlSession>();
 
 ```Java
 private SqlSessionManager(SqlSessionFactory sqlSessionFactory) {
+    //sqlSessionFactory是被代理的类，存放在localSqlSession这个ThreadLocal变量里，在执行org.apache.ibatis.session.SqlSessionManager.SqlSessionInterceptor#invoke方法时取值 
     this.sqlSessionFactory = sqlSessionFactory;
     //通过动态代理产生一个sqlSession的代理类
     this.sqlSessionProxy = (SqlSession) Proxy.newProxyInstance(
@@ -1115,7 +1116,11 @@ private void flushPendingEntries() {
 
   SynchronizedCache – 同步的缓存装饰器，用于防止多线程并发访问
 
-* 二级缓存引用顺序：BlockingCache-->SynchronizedCache-->LoggingCache-->SerializedCache-->ScheduledCache-->LruCache/FifoCache/SoftCache/WeakCache-->PerpetualCache
+* `LruCache`实现方式：TODO
+
+* `FifoCache`实现方式：TODO
+
+* 二级缓存引用顺序：BlockingCache-->SynchronizedCache-->LoggingCache-->SerializedCache->ScheduledCache-->LruCache/FifoCache/SoftCache/WeakCache-->PerpetualCache
 
   ```java
   public Cache build() {
@@ -1197,7 +1202,76 @@ private void flushPendingEntries() {
 > `org.apache.ibatis.executor.Executor`接口，sql执行器，SqlSession执行sql最终是通过该接口实现的，常用的实现类有SimpleExecutor和CachingExecutor，这些实现类都使用了装饰者设计模式
 
 * ![image-20181005163449385](/var/folders/fr/4dpl599d5gj7gpt4csyc3x5m0000gn/T/abnerworks.Typora/image-20181005163449385.png)
-* 
+
+### BaseExecutor
+
+* 抽象类`BaseExecutor`实现了`Executor`接口，提供了缓存管理和事务管理的基本功能，继承`BaseExecutor`抽象类的子类需要实现以下方法：doUpdate()、doFlushStatements()、doQuery()
+
+  * 一级缓存：如果一级缓存不存在则直接从数据库中查询，即执行方法`org.apache.ibatis.executor.BaseExecutor#queryFromDatabase`，并将结果放入到一级缓存中；执行方法`org.apache.ibatis.executor.BaseExecutor#update`会清理一级缓存；详细见《mybatis缓存》章节
+
+  ```java
+  //一级缓存
+  protected PerpetualCache localCache;
+  //本地输出参数缓存
+  protected PerpetualCache localOutputParameterCache;
+  @Override
+  public void clearLocalCache() {
+      if (!closed) {
+          localCache.clear();
+          localOutputParameterCache.clear();
+      }
+  }
+  ```
+
+  * 事务管理：抽象类`BaseExecutor`提供了commit()、rollback()方法，在执行这两个方法都会清理一级缓存、刷新语句以及提交事务或回滚事务
+
+  ```java
+  @Override
+  public void commit(boolean required) throws SQLException {
+      if (closed) {
+          throw new ExecutorException("Cannot commit, transaction is already closed");
+      }
+      clearLocalCache();
+      //默认为执行
+      flushStatements();
+      //required为true，提交事务
+      if (required) {
+          transaction.commit();
+      }
+  }
+  
+  @Override
+  public void rollback(boolean required) throws SQLException {
+      if (!closed) {
+          try {
+              clearLocalCache();
+              //false表示执行，true表示不执行
+              flushStatements(true);
+          } finally {
+              //required为true，回滚事务 
+              if (required) {
+                  transaction.rollback();
+              }
+          }
+      }
+  }
+  ```
+
+* 类`SimpleExecutor`继承抽象类`BaseExecutor`，实现方法doUpdate()、doFlushStatements()、doQuery()
+  * 类`SimpleExecutor`不考虑一级缓存、事务等相关操作；一级缓存不存在执行`org.apache.ibatis.executor.BaseExecutor#queryFromDatabase`方法时，才执行`SimpleExecutor#doQuery`方法；执行`org.apache.ibatis.executor.BaseExecutor#update`方法时，才执行`SimpleExecutor#doUpdate`方法
+  * 类`SimpleExecutor`不提供批量SQL语句处理，因此doFlushStatements()实现直接返回空
+
+* 类`ReuseExecutor`继承抽象类`BaseExecutor`，实现方式与`SimpleExecutor`类似
+  * 
+
+* 类`BatchExecutor`
+* 类`CachingExecutor`
+
+* 模板方法模式
+
+
+
+​	
 
 ### 键值生成器KeyGenerator
 
