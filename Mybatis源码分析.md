@@ -6,13 +6,14 @@
 
 > Mybatis涉及到的设计模式：
 >
-> * 工厂模式：SqlSessionFactory、DataSourceFactory、MapperProxyFactory
-> * 建造者模式：SqlSessionFactoryBuilder
-> * 动态代理模式：MapperProxy
-> * 装饰器模式：CachingExecutor
+> * 工厂模式：`SqlSessionFactory`、`DataSourceFactory`、`MapperProxyFactory`
+> * 建造者模式：`SqlSessionFactoryBuilder`
+> * 动态代理模式：`MapperProxy`
+> * 装饰器模式：`CachingExecutor`
 > * 适配器模式：日志模块
 > * 单例模式：VFS
 > * 策略模式：
+> * 模板方法模式：`BaseExecutor`是抽象类，子类`BatchExecutor`、`ReuseExecutor`、`SimpleExecutor`、`CachingExecutor`都继承于`BaseExecutor`类
 
 ## 配置文件Configuration
 
@@ -1116,9 +1117,27 @@ private void flushPendingEntries() {
 
   SynchronizedCache – 同步的缓存装饰器，用于防止多线程并发访问
 
-* `LruCache`实现方式：TODO
+* `LruCache`采用LinkedHashMap来实现LRU，LinkedHashMap相当于LinkedList+HashMap，拥有双向链表的HashMap数据结构，`LinkedHaspMap`中的accessOrder：true表示按照访问顺序迭代，false时表示按照插入顺序
 
-* `FifoCache`实现方式：TODO
+   ```java
+  public void setSize(final int size) {
+      keyMap = new LinkedHashMap<Object, Object>(size, .75F, true) {
+          private static final long serialVersionUID = 4267176411845948333L;
+          //覆盖LinkedHashMap.removeEldestEntry方法，当移除最久未使用的值
+          @Override
+          protected boolean removeEldestEntry(Map.Entry<Object, Object> eldest) {
+              boolean tooBig = size() > size;
+              if (tooBig) {
+                  //记录移除的key
+                  eldestKey = eldest.getKey();
+              }
+              return tooBig;
+          }
+      };
+  }
+   ```
+
+* `FifoCache`采用LinkedList实现FIFO，LinkedList双向链表，超出长度就调用`LinkedList#removeFirst()`方法清除第一个
 
 * 二级缓存引用顺序：BlockingCache-->SynchronizedCache-->LoggingCache-->SerializedCache->ScheduledCache-->LruCache/FifoCache/SoftCache/WeakCache-->PerpetualCache
 
@@ -1283,11 +1302,7 @@ private Set<Object> entriesMissedinCache;
 
 > TransactionalCache.putObject()方法并没有直接将结果对象记录到其封装的二级缓存中，而是暂时保存在 entriesToAddOnCommit 集合中，在事务提交时才会将这些结果对象从entriesToAddOnCommit 集合添加到二级缓存中
 
-* 模板方法模式
-
-
-
-​	
+* 模板方法模式：`BaseExecutor`是抽象类，子类`BatchExecutor`、`ReuseExecutor`、`SimpleExecutor`、`CachingExecutor`都继承`BaseExecutor`类，使用了模板方法模式
 
 ### 键值生成器KeyGenerator
 
