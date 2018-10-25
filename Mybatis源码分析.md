@@ -1087,7 +1087,7 @@ private void flushPendingEntries() {
 }
 ```
 
-* 存在的问题：TODO
+* 存在的问题：TODO [MyBatis缓存机制--实验4](https://tech.meituan.com/mybatis_cache.html)
 
 ### Cache接口
 
@@ -1262,10 +1262,26 @@ private void flushPendingEntries() {
   * 类`SimpleExecutor`不提供批量SQL语句处理，因此doFlushStatements()实现直接返回空
 
 * 类`ReuseExecutor`继承抽象类`BaseExecutor`，实现方式与`SimpleExecutor`类似
-  * 
 
-* 类`BatchExecutor`
-* 类`CachingExecutor`
+  * 在doUpdate()、doQuery()方法中重用`Statement`对象
+  * `doFlushStatements`方法清空`Statement`对象
+
+* 类`BatchExecutor`批处理执行器只支持insert、update、delete等类型语句的批量处理，不支持select类型语句的批量处理，doUpdate()方法添加sql`handler.batch(stmt) `， doFlushStatements()方法批量执行sql`Statement.executeBatch()`方法批量执行其中记录的 SQL 语句
+
+* 类`CachingExecutor`依赖于`TransactionalCache`和`TransactionalCacheManager`两个组件，`TransactionalCache`实现了`Cache`接口，`TransactionalCache`代码：
+
+```java 
+//底层封装的二级缓存所对应的 Cache 对象
+private Cache delegate; 
+//当该字段为true时，则表示当前TransactionalCache 不可查询，且提交事务时会将底层Cache清空
+private boolean clearOnCommit; 
+//暂时记录添加到TransactionalCache中的数据 在事务提交时，会将其中的数据添加到二级缓存中
+private Map<Object, Object> entriesToAddOnCommit; 
+//记录缓存未命中的CacheKey 对象
+private Set<Object> entriesMissedinCache;
+```
+
+> TransactionalCache.putObject()方法并没有直接将结果对象记录到其封装的二级缓存中，而是暂时保存在 entriesToAddOnCommit 集合中，在事务提交时才会将这些结果对象从entriesToAddOnCommit 集合添加到二级缓存中
 
 * 模板方法模式
 
