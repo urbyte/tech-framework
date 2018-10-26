@@ -1117,10 +1117,10 @@ private void flushPendingEntries() {
 
   SynchronizedCache – 同步的缓存装饰器，用于防止多线程并发访问
 
-* `LruCache`采用LinkedHashMap来实现LRU，LinkedHashMap相当于LinkedList+HashMap，拥有双向链表的HashMap数据结构，`LinkedHaspMap`中的accessOrder：true表示按照访问顺序迭代，false时表示按照插入顺序
+* `LruCache`采用LinkedHashMap来实现LRU，LinkedHashMap相当于双向链表+HashMap，拥有双向链表的HashMap数据结构，`LinkedHaspMap`中的accessOrder：true表示按照访问顺序迭代，false时表示按照插入顺序
 
    ```java
-  public void setSize(final int size) {
+     public void setSize(final int size) {
       keyMap = new LinkedHashMap<Object, Object>(size, .75F, true) {
           private static final long serialVersionUID = 4267176411845948333L;
           //覆盖LinkedHashMap.removeEldestEntry方法，当移除最久未使用的值
@@ -1134,10 +1134,65 @@ private void flushPendingEntries() {
               return tooBig;
           }
       };
-  }
+     }
    ```
 
 * `FifoCache`采用LinkedList实现FIFO，LinkedList双向链表，超出长度就调用`LinkedList#removeFirst()`方法清除第一个
+
+* `SoftCache`采用SoftReference、ReferenceQueue实现在内存不足时JVM就会自动回收被软引用的对象，同时将这个软引用加入到引用队列中；`SoftCache`中用链表强引用最近访问的元素，在发生内存不足时回收最近没有访问的元素，充分利用了JVM回收机制
+
+```java 
+//利用链表用来引用元素，也就是强引用，防止垃圾回收
+private final Deque<Object> hardLinksToAvoidGarbageCollection;
+//被垃圾回收的引用队列
+private final ReferenceQueue<Object> queueOfGarbageCollectedEntries;
+private final Cache delegate;
+//链表强引用元素的数量
+private int numberOfHardLinks;
+
+@Override
+public Object getObject(Object key) {
+    Object result = null;
+    SoftReference<Object> softReference = (SoftReference<Object>) delegate.getObject(key);
+    if (softReference != null) {
+        //核心调用SoftReference.get取得元素
+        result = softReference.get();
+        if (result == null) {
+            delegate.removeObject(key);
+        } else {
+            synchronized (hardLinksToAvoidGarbageCollection) {
+                //存入最近访问的键值到链表(默认最多256个元素),防止垃圾回收
+                hardLinksToAvoidGarbageCollection.addFirst(result);
+                if (hardLinksToAvoidGarbageCollection.size() > numberOfHardLinks) {
+                    hardLinksToAvoidGarbageCollection.removeLast();
+                }
+            }
+        }
+    }
+    return result;
+}
+
+private void removeGarbageCollectedItems() {
+    SoftEntry sv;
+    //检查垃圾回收的引用队列,然后调用removeObject移除
+    while ((sv = (SoftEntry) queueOfGarbageCollectedEntries.poll()) != null) {
+        delegate.removeObject(sv.key);
+    }
+}
+
+private static class SoftEntry extends SoftReference<Object> {
+    private final Object key;
+	//garbageCollectionQueue引用队列，在垃圾回收时将软引用SoftEntry存入到队列中
+    SoftEntry(Object key, Object value, ReferenceQueue<Object> garbageCollectionQueue) {
+        super(value, garbageCollectionQueue);
+        this.key = key;
+    }
+}
+```
+
+* `WeakCache`和`SoftCache`类似，`WeakCache`用的WeakReference来实现弱引用
+
+* `ScheduledCache`定期清理缓存，在getSize()、putObject()、getObject()、removeObject()时调用清理策略，判断当前时间与上一次清理时间超过默认值一小时，超过就清空缓存
 
 * 二级缓存引用顺序：BlockingCache-->SynchronizedCache-->LoggingCache-->SerializedCache->ScheduledCache-->LruCache/FifoCache/SoftCache/WeakCache-->PerpetualCache
 
