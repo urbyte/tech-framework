@@ -501,6 +501,7 @@ languageRegistry.register(RawLanguageDriver.class);
         keyProperty 对应的model中的主键的属性名，这里是user中的id，因为它跟数据库的主键对应
         order AFTER 表示 SELECT LAST_INSERT_ID() 在insert执行之后执行,多用与自增主键，
               BEFORE 表示 SELECT LAST_INSERT_ID() 在insert执行之前执行，这样的话就拿不到主键了，这种适合那种主键不是自增的类型
+			  默认为AFTER
         resultType 主键类型 -->
     <selectKey keyProperty="id" order="AFTER" resultType="java.lang.Integer">
         SELECT LAST_INSERT_ID()
