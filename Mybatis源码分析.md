@@ -1362,6 +1362,18 @@ private Set<Object> entriesMissedinCache;
 
 ### 键值生成器KeyGenerator
 
+* `KeyGenerator`接口实现类`NoKeyGenerator`、`Jdbc3KeyGenerator`、`SelectKeyGenerator`；`NoKeyGenerator`不用键值生成器，对接口`KeyGenerator`的方法是空实现
+* `Jdbc3KeyGenerator`实现接口`KeyGenerator`的`processAfter`方法，`processBefore`方法是空实现
+
+```xml
+<insert id="test_insert" useGeneratedKeys="true" keyProperty＝"id">
+    INSERT INTO t_user(username,pwd) VALUES 
+    <foreach item="item" collection="list" separator=",">
+    	(#{item.username},#{item.pwd})
+    </foreach>
+</insert>
+```
+
 
 
 ### 结果集处理器ResultSetHandler
