@@ -501,6 +501,7 @@ languageRegistry.register(RawLanguageDriver.class);
         keyProperty 对应的model中的主键的属性名，这里是user中的id，因为它跟数据库的主键对应
         order AFTER 表示 SELECT LAST_INSERT_ID() 在insert执行之后执行,多用与自增主键，
               BEFORE 表示 SELECT LAST_INSERT_ID() 在insert执行之前执行，这样的话就拿不到主键了，这种适合那种主键不是自增的类型
+			  默认为AFTER
         resultType 主键类型 -->
     <selectKey keyProperty="id" order="AFTER" resultType="java.lang.Integer">
         SELECT LAST_INSERT_ID()
@@ -1361,7 +1362,34 @@ private Set<Object> entriesMissedinCache;
 
 ### 键值生成器KeyGenerator
 
+* `KeyGenerator`接口实现类`NoKeyGenerator`、`Jdbc3KeyGenerator`、`SelectKeyGenerator`；`NoKeyGenerator`不用键值生成器，对接口`KeyGenerator`的方法是空实现
+* `Jdbc3KeyGenerator`实现接口`KeyGenerator`的`processAfter`方法，`processBefore`方法是空实现
+  * 获取用户的传入参数parameters，遍历parameters将ResultSet中的id设置到对应的对象id属性中
 
+```xml
+<insert id="test_insert" useGeneratedKeys="true" keyProperty＝"id">
+    INSERT INTO user(username,password) VALUES 
+    <foreach item="item" collection="list" separator=",">
+    	(#{item.username},#{item.password})
+    </foreach>
+</insert>
+```
+
+![1541584859465](C:\Users\chenk\AppData\Roaming\Typora\typora-user-images\1541584859465.png)
+
+* `SelectKeyGenerator`主要用于不支持自动生成自增主键的数据库，在配置文件中增加<selectKey>节点的SQL语句，实现接口`KeyGenerator`的`processAfter`、`processBefore`方法，调用相同方法`processGeneratedKeys`
+
+```xml
+<insert id="insertUser">
+    <!-- 在insert执行之前，先执行<selectKey>节点对应的语句，生成的id赋值给keyProperty属性值-->
+    <selectKey keyProperty="id" resultType="int" order="BEFORE">
+        select LAST_INSERT_ID()
+    </selectKey>
+    INSERT INTO user(id,username,password) VALUES (#{id},#{username},#{password})
+</insert>
+```
+
+![1541585961535](C:\Users\chenk\AppData\Roaming\Typora\typora-user-images\1541585961535.png)
 
 ### 结果集处理器ResultSetHandler
 
