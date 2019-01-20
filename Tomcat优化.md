@@ -1,6 +1,8 @@
-###Tomcat优化
+###Tomcat配置优化
 
-####场景一：假设当前REST应用（微服务）
+#### 减配优化
+
+#####场景一：假设当前REST应用（微服务）
 
 * 分析：它不需要静态资源，Tomcat容器静态和动态
 
@@ -44,7 +46,7 @@
 
     移除`AccessLogValue`,可以通过Nginx的AccessLog替代，`Value`实现都需要消耗Java应用的计算时间。
 
-#### 场景二：需要JSP的情况
+#####场景二：需要JSP的情况
 
  * 分析：`JspServlet`无法移除，了解`JspServlet`处理原理
 
@@ -88,7 +90,60 @@
 
 ​	JspServlet如果development参数为true，它会自定检查文件是否修改，如果修改重新翻译，再    编译（加载和执行）。言外之意，JspServlet开发模式可能会导致内存溢出，原因：卸载Class不及时所导致Perm区域不够。
 
+	>如何卸载class：
+	>
+	>ParentClassLoader 加载 1.class 2.class 3.class
+	>
+	>ChildClassLoader 加载 4.class 5.class
+	>
+	>1.class需要卸载，需要将ParentClassLoader设置为null,当ClassLoader被GC后，1-3class全部会被卸载。
 
+#### 配置调整
+
+##### 关闭自动重载
+
+`context.xml`
+
+```xml
+<Context docBase="" reloadable="false"></Context>
+```
+
+
+
+##### 修改连接线程池数量
+
+`server.xml`
+
+```xml
+<Executor name="tomcatThreadPool" namePrefix="catalina-exec-" maxThreads="150" minSpareThreads="4"/>
+<Connector executor="tomcatThreadPool" port="8080" protocol="HTTP/1.1" connectionTimeout="20000" redirectPort="8443"/>
+```
+
+> 通过程序来理解，`<Executor>`实际的Tomcat接口：
+>
+> * `org.apache.catelina.Executor`
+>
+>   * 扩展：J.U.C标准接口`java.util.concurrent.Executor`
+>
+>   * 实现：`org.apache.catalina.core.StandardThreadExecutor`
+>
+>     ```java
+>     /**
+>      * max number of threads,默认最大数量
+>      */
+>     protected int maxThreads = 200;
+>     
+>     /*
+>      * min number of threads
+>      */
+>     protected int minSpaceThreads = 25;
+>     ```
+>
+>     * 线程池：
+>
+>       `org.apache.tomcat.util.threads.ThreadPoolExecutor`(`java.util.concurrent.ThreadPoolExecutor`)
+>
+>     总结：Tomcat IO连接器使用的线程池实际是标准的Java线程池的扩展，最大线程数量和最小线程数量实际上分别是MaximumPoolSize 和 CorePoolSize。
 
 
 
