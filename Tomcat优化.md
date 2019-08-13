@@ -1,5 +1,7 @@
 ###Tomcat配置优化
 
+作者：ky
+
 #### 减配优化
 
 #####场景一：假设当前REST应用（微服务）
@@ -7,6 +9,7 @@
 * 分析：它不需要静态资源，Tomcat容器静态和动态
 
   * 静态处理：DefaultServlet
+
     * 优化方案：通过移除conf/web.xml中org.apache.catalina.servlet.DefaultServlet
 
   * 动态处理：JspServlet
