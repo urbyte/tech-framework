@@ -858,7 +858,7 @@ public <E> List<E> selectList(String statement, Object parameter, RowBounds rowB
 }
 ```
 
-* 生成一级缓存的key，规则为：TODO
+* 生成一级缓存的key，规则为：mappedStementId + offset + limit + SQL + queryParams + environment
 
 ```java
 @Override
